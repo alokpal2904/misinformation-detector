@@ -10,3 +10,4 @@ pydantic
 uvicorn
 fastapi
 streamlit
+gnews

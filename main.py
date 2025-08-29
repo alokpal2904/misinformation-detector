@@ -11,6 +11,7 @@ import requests
 import json
 import wikipedia
 import re
+from gnews import GNews
 
 load_dotenv()
 
@@ -106,6 +107,43 @@ def enhanced_duckduckgo_search(query):
     except Exception as e:
         return f"Error with DuckDuckGo search: {str(e)}"
 
+def google_news_search(query):
+    """Search using Google News API"""
+    try:
+        google_news = GNews()
+        articles = google_news.get_news(query)
+        
+        if not articles:
+            return f"Google News Search for '{query}': No recent news articles found."
+        
+        # Format the top 3 articles
+        formatted_articles = []
+        for i, article in enumerate(articles[:3]):  # Get top 3 articles
+            formatted_articles.append(
+                f"Article {i+1}:\n"
+                f"Title: {article.get('title', 'No title')}\n"
+                f"Description: {article.get('description', 'No description')}\n"
+                f"Published: {article.get('published date', 'Unknown date')}\n"
+                f"Source: {article.get('publisher', {}).get('title', 'Unknown source')}\n"
+                f"URL: {article.get('url', 'No URL')}\n"
+            )
+        
+        return f"Google News Results for '{query}':\n\n" + "\n".join(formatted_articles)
+        
+    except Exception as e:
+        return f"Error with Google News search: {str(e)}"
+
+def contains_negation(claim):
+    """Check if the claim contains negation words"""
+    negation_words = ['not', 'no', 'never', 'none', 'nobody', 'nothing', 
+                     'nowhere', 'neither', 'nor', 'cannot', "isn't", "aren't", 
+                     "wasn't", "weren't", "haven't", "hasn't", "hadn't", 
+                     "don't", "doesn't", "didn't", "won't", "wouldn't", 
+                     "shouldn't", "couldn't", "mightn't", "mustn't"]
+    
+    claim_lower = claim.lower()
+    return any(negation_word in claim_lower for negation_word in negation_words)
+
 def create_verification_tools():
     """Create tools for the verification agent"""
     wikipedia_tool = Tool(
@@ -126,7 +164,13 @@ def create_verification_tools():
         description="Useful for retrieving general web search results for fact-checking"
     )
     
-    return [wikipedia_tool, perplexity_tool, duckduckgo_tool]
+    google_news_tool = Tool(
+        name="GoogleNewsSearch",
+        func=google_news_search,
+        description="Useful for retrieving recent news articles from Google News for current events verification"
+    )
+    
+    return [wikipedia_tool, perplexity_tool, duckduckgo_tool, google_news_tool]
 
 def create_verification_agent(llm, tools):
     """Create a ReAct agent for claim verification"""
@@ -134,10 +178,18 @@ def create_verification_agent(llm, tools):
     prompt_template = """You are an expert fact-checker and misinformation detection agent. 
 Your goal is to verify claims by using available tools to gather evidence from multiple sources.
 
-IMPORTANT: You MUST use ALL available tools to research the claim thoroughly:
-1. First, use WikipediaSearch to get background information
-2. Then, use PerplexityWebSearch for high-quality web results
-3. Finally, use DuckDuckGoWebSearch for general web search results
+CRITICAL: Pay close attention to NEGATION words in the claim (not, no, never, etc.). 
+The verification status should reflect whether the ENTIRE CLAIM is true or false, including any negations.
+
+For example:
+- Claim: "Usain Bolt is not the fastest man" → If evidence shows he IS the fastest, then verification status should be FALSE
+- Claim: "COVID-19 is not dangerous" → If evidence shows it IS dangerous, then verification status should be FALSE
+
+IMPORTANT: Use ALL available tools to research the claim thoroughly:
+1. Use WikipediaSearch for background information
+2. Use PerplexityWebSearch for high-quality web results
+3. Use GoogleNewsSearch for recent news articles
+4. Use DuckDuckGoWebSearch for general web search results
 
 After using all tools, provide your final verification.
 
@@ -162,7 +214,7 @@ Your Final Answer must be in this exact format:
 - EVIDENCE SUMMARY: [brief summary of key evidence]
 - DETAILED EXPLANATION: [detailed explanation of your reasoning]
 
-Begin! Remember to use ALL available tools.
+Begin! Remember to carefully evaluate NEGATION in claims.
 
 Question: {input}
 {agent_scratchpad}"""
@@ -178,7 +230,7 @@ Question: {input}
         tools=tools, 
         verbose=True,
         handle_parsing_errors=True,
-        max_iterations=6,  # Increased to allow for all tools to be used
+        max_iterations=12,
         return_intermediate_steps=True
     )
     
@@ -217,8 +269,12 @@ def process_claim_with_agent(claim):
     # Create agent
     agent = create_verification_agent(llm, tools)
     
-    # Create prompt for the agent
-    agent_prompt = f"Verify this claim: {claim}"
+    # Create enhanced prompt that emphasizes negation awareness
+    negation_warning = ""
+    if contains_negation(claim):
+        negation_warning = "CRITICAL: This claim contains NEGATION. Carefully evaluate whether the evidence supports or contradicts the negated statement. "
+    
+    agent_prompt = f"Verify this claim ({negation_warning}): {claim}"
     
     # Execute the agent
     with st.spinner("🤖 Agent is researching and analyzing the claim..."):
@@ -274,20 +330,38 @@ def process_claim_with_agent(claim):
 # Streamlit UI
 def main():
     st.title("🔍 AI Agentic Misinformation Detector")
-    st.write("Enter a claim to verify its accuracy using AI agents that dynamically research multiple sources")
+    st.write("Enter a claim to verify its accuracy using AI agents that dynamically research multiple authoritative sources")
     
     # Text input for claim
     claim = st.text_area("Enter the claim to verify:", height=100, 
-                         placeholder="e.g., 'The moon landing was faked' or 'Vaccines cause autism'")
+                         placeholder="Check your Facts")
     
     if st.button("🚀 Verify Claim with AI Agent", type="primary"):
         if claim:
+            # Show negation warning if applicable
+            # if contains_negation(claim):
+            #     st.info("⚠️ **Note:** This claim contains negation. The agent will carefully evaluate whether the evidence supports the negated statement.")
+            
             result = process_claim_with_agent(claim)
             
             st.subheader("📊 Agent Verification Result")
             
-            # Display the agent's verification result
-            st.write(result["verification"])
+            # Display the agent's verification result with color coding
+            verification_text = result["verification"]
+            if "False" in verification_text and contains_negation(claim):
+                st.error(verification_text)
+                # st.info("🔍 **Interpretation:** The evidence contradicts the negated claim, making the overall statement false.")
+            elif "True" in verification_text and contains_negation(claim):
+                st.success(verification_text)
+                # st.info("🔍 **Interpretation:** The evidence supports the negated claim, making the overall statement true.")
+            elif "False" in verification_text:
+                st.error(verification_text)
+            elif "True" in verification_text:
+                st.success(verification_text)
+            elif "Mixed" in verification_text:
+                st.warning(verification_text)
+            else:
+                st.info(verification_text)
             
             # Display tool outputs if available
             if result["tool_outputs"]:
@@ -302,6 +376,11 @@ def main():
                 if "PerplexityWebSearch" in result["tool_outputs"]:
                     with st.expander("🤖 Perplexity AI Results"):
                         st.text_area("Perplexity Evidence", result["tool_outputs"]["PerplexityWebSearch"], height=150, key="perplexity_evidence")
+                
+                # Display Google News results
+                if "GoogleNewsSearch" in result["tool_outputs"]:
+                    with st.expander("📰 Google News Results"):
+                        st.text_area("Google News Evidence", result["tool_outputs"]["GoogleNewsSearch"], height=200, key="googlenews_evidence")
                 
                 # Display DuckDuckGo results
                 if "DuckDuckGoWebSearch" in result["tool_outputs"]:
