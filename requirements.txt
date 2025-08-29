@@ -1,0 +1,12 @@
+langchain
+langchain-community
+langchain-core
+langchain_openai
+huggingface_hub
+faiss-cpu
+wikipedia
+python-dotenv
+pydantic
+uvicorn
+fastapi
+streamlit
