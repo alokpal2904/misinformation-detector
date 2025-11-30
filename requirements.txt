@@ -11,3 +11,4 @@ uvicorn
 fastapi
 streamlit
 gnews
+langchain-huggingface
