@@ -21,8 +21,9 @@ except ImportError:
     from langchain_community.embeddings import HuggingFaceEmbeddings
     st.warning("Please install the latest HuggingFace integration: `pip install -U langchain-huggingface`")
 
-openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-perplexity_api_key = os.getenv("PERPLEXITY_API_KEY")
+openrouter_api_key = st.secrets.get("OPENROUTER_API_KEY")
+perplexity_api_key = st.secrets.get("PERPLEXITY_API_KEY")
+
 
 if not openrouter_api_key:
     st.error("Please set OPENROUTER_API_KEY in your .env file")
